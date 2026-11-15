@@ -29,18 +29,21 @@ def get_metrics(data):
         "libraries_done": int(libraries.get("done", 0)),
         "libraries_total": int(libraries.get("total", 0)),
         "libraries_percent": float(libraries.get("percent", 0)),
+
         "rdna2_decoded": int(
             shader.get("instructions", {}).get("decoded", 0)
         ),
         "rdna2_total": int(
             shader.get("instructions", {}).get("total", 0)
         ),
+
         "gfx1013_decoded": int(
             gfx.get("instructions", {}).get("decoded", 0)
         ),
         "gfx1013_total": int(
             gfx.get("instructions", {}).get("total", 0)
         ),
+
         "dpp_decoded": int(
             shader.get("dpp", {}).get("decoded", 0)
         ),
@@ -61,7 +64,6 @@ def load_previous():
 
         required = [
             "libraries_done",
-            "libraries_total",
             "rdna2_decoded",
             "gfx1013_decoded",
             "dpp_decoded"
@@ -88,129 +90,71 @@ def delta(current, previous):
 
     if difference > 0:
         return f"+{difference:,}"
-    elif difference < 0:
+
+    if difference < 0:
         return f"{difference:,}"
 
     return "0"
 
 
-def progress_bar(percent):
-    filled = round(percent / 5)
-    filled = max(0, min(20, filled))
-    return "[" + ("█" * filled) + ("░" * (20 - filled)) + "]"
-
-
 def make_embed(current, previous):
     now = datetime.now(timezone.utc).strftime(
-        "%Y-%m-%d %H:%M UTC"
+        "%d %b %Y • %H:%M UTC"
     )
 
+    def change(key):
+        if previous is None:
+            return "First update"
+
+        return delta(
+            current[key],
+            previous.get(key, current[key])
+        )
+
     if previous is None:
-        description = (
-            "📊 **Initial progress baseline**\n"
-            "The next report will show changes."
-        )
-        first = True
+        description = "📊 First progress report."
     else:
-        description = "📈 **Progress since the previous update**"
-        first = False
+        description = "📈 Changes compared with the previous update."
 
-    fields = []
-
-    # Libraries
-    lib_done = current["libraries_done"]
-    lib_total = current["libraries_total"]
-    lib_percent = current["libraries_percent"]
-
-    if first:
-        lib_change = "First report"
-    else:
-        lib_change = delta(
-            lib_done,
-            previous["libraries_done"]
-        )
-
-    fields.append({
-        "name": "📚 LIBRARIES IMPLEMENTED",
-        "value": (
-            f"**{lib_done:,} / {lib_total:,}** implemented\n"
-            f"**Completion:** {lib_percent:.2f}%\n"
-            f"`{progress_bar(lib_percent)}`\n"
-            f"**Change:** `{lib_change}`"
+    lines = [
+        "📚 **Libraries**",
+        (
+            f"{current['libraries_done']:,} / "
+            f"{current['libraries_total']:,} implemented "
+            f"({current['libraries_percent']:.2f}%)"
         ),
-        "inline": False
-    })
-
-    # RDNA2
-    rdna2 = current["rdna2_decoded"]
-
-    if first:
-        rdna2_change = "First report"
-    else:
-        rdna2_change = delta(
-            rdna2,
-            previous["rdna2_decoded"]
-        )
-
-    fields.append({
-        "name": "⚙️ RDNA2 INSTRUCTIONS",
-        "value": (
-            f"**{rdna2:,} / "
-            f"{current['rdna2_total']:,}** decoded\n"
-            f"**Change:** `{rdna2_change}`"
+        "",
+        "⚙️ **RDNA2**",
+        (
+            f"{current['rdna2_decoded']:,} / "
+            f"{current['rdna2_total']:,} decoded"
         ),
-        "inline": False
-    })
-
-    # GFX1013
-    gfx = current["gfx1013_decoded"]
-
-    if first:
-        gfx_change = "First report"
-    else:
-        gfx_change = delta(
-            gfx,
-            previous["gfx1013_decoded"]
-        )
-
-    fields.append({
-        "name": "🎮 GFX1013 REFERENCE",
-        "value": (
-            f"**{gfx:,} / "
-            f"{current['gfx1013_total']:,}** decoded\n"
-            f"**Change:** `{gfx_change}`"
+        "",
+        "🎮 **GFX1013**",
+        (
+            f"{current['gfx1013_decoded']:,} / "
+            f"{current['gfx1013_total']:,} decoded"
         ),
-        "inline": False
-    })
-
-    # DPP
-    dpp = current["dpp_decoded"]
-
-    if first:
-        dpp_change = "First report"
-    else:
-        dpp_change = delta(
-            dpp,
-            previous["dpp_decoded"]
-        )
-
-    fields.append({
-        "name": "🔧 DPP INSTRUCTIONS",
-        "value": (
-            f"**{dpp:,} / "
-            f"{current['dpp_total']:,}** decoded\n"
-            f"**Change:** `{dpp_change}`"
+        "",
+        "🔧 **DPP**",
+        (
+            f"{current['dpp_decoded']:,} / "
+            f"{current['dpp_total']:,} decoded"
         ),
-        "inline": False
-    })
+        "",
+        "📈 **Since last update**",
+        f"Libraries: `{change('libraries_done')}`",
+        f"RDNA2: `{change('rdna2_decoded')}`",
+        f"GFX1013: `{change('gfx1013_decoded')}`",
+        f"DPP: `{change('dpp_decoded')}`"
+    ]
 
     return {
-        "title": "🚀 AnyPS5 - Progress Report",
-        "description": description,
+        "title": "🚀 AnyPS5 Progress",
+        "description": description + "\n\n" + "\n".join(lines),
         "color": 5793266,
-        "fields": fields,
         "footer": {
-            "text": f"Automatic update • {now}"
+            "text": f"Updated • {now}"
         }
     }
 
@@ -251,6 +195,7 @@ def send_discord(embed):
         details = error.read().decode(
             "utf-8", errors="replace"
         )
+
         print("Discord HTTP status:", error.code)
         print("Discord error details:", details)
         raise
