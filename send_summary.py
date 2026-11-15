@@ -2,224 +2,180 @@
 import json
 import os
 import urllib.request
+import urllib.error
+from pathlib import Path
 from datetime import datetime, timezone
 
-PROGRESS_URL = "https://boykopovar.github.io/AnyPS5/progress.json"
-STATE_FILE = "last_progress.json"
-WEBHOOK = os.environ["DISCORD_WEBHOOK_URL"]
+DATA_URL = "https://boykopovar.github.io/AnyPS5/progress.json"
+STATE_FILE = Path("last_progress.json")
 
 
-def fetch_json(url):
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "AnyPS5-Discord-Tracker"}
+def fetch_progress():
+    request = urllib.request.Request(
+        DATA_URL,
+        headers={"User-Agent": "AnyPS5-Discord-Bot"}
     )
-    with urllib.request.urlopen(req, timeout=45) as response:
+
+    with urllib.request.urlopen(request, timeout=45) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def signed(number):
-    return f"+{number:,}" if number > 0 else f"{number:,}"
+def get_metrics(data):
+    libraries = data.get("libraries", {})
+    shader_source = data.get("shader_source", {})
+    instructions = shader_source.get("instructions", {})
+    profiles = shader_source.get("profiles", {})
+    gfx1013 = profiles.get("gfx1013", {})
+    gfx_instructions = gfx1013.get("instructions", {})
+
+    return {
+        "libraries": (
+            libraries.get("completed", 0)
+            if isinstance(libraries, dict)
+            else 0
+        ),
+        "rdna2": (
+            instructions.get("decoded", 0)
+            if isinstance(instructions, dict)
+            else 0
+        ),
+        "gfx1013": (
+            gfx_instructions.get("decoded", 0)
+            if isinstance(gfx_instructions, dict)
+            else 0
+        ),
+    }
 
 
-def percentage(done, total):
-    return done / total * 100 if total else 0
+def load_previous():
+    if not STATE_FILE.exists():
+        return None
+
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
-def metric(name, done, total, old=None):
-    result = (
-        f"`{done:,} / {total:,}`"
-        f" • **{percentage(done, total):.2f}%**"
+def save_current(metrics):
+    STATE_FILE.write_text(
+        json.dumps(metrics, indent=2),
+        encoding="utf-8"
     )
 
-    if old is None:
-        result += "\nأول قراءة - تبدأ المقارنة من التقرير القادم"
-    else:
-        result += f"\nالتغير: **{signed(done - old)}**"
 
-    return f"**{name}**\n{result}"
+def format_delta(current, previous):
+    difference = current - previous
+
+    if difference > 0:
+        return f"+{difference:,}"
+    if difference < 0:
+        return f"{difference:,}"
+    return "0"
+
+
+def make_embed(current, previous):
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    fields = []
+
+    names = {
+        "libraries": "Libraries completed",
+        "rdna2": "RDNA2 instructions decoded",
+        "gfx1013": "GFX1013 instructions decoded",
+    }
+
+    for key, name in names.items():
+        value = current.get(key, 0)
+
+        if previous is None:
+            change = "First report - baseline"
+        else:
+            old_value = previous.get(key, 0)
+            change = format_delta(value, old_value)
+
+        fields.append({
+            "name": name,
+            "value": f"**{value:,}**\nChange: `{change}`",
+            "inline": True
+        })
+
+    if previous is None:
+        description = "Initial progress report. The next update will show changes."
+    else:
+        changes = [
+            current.get(key, 0) - previous.get(key, 0)
+            for key in names
+        ]
+
+        if any(value > 0 for value in changes):
+            description = "Progress has increased since the previous report."
+        elif any(value < 0 for value in changes):
+            description = "Some reported values have changed since the previous report."
+        else:
+            description = "No progress changes detected since the previous report."
+
+    return {
+        "title": "AnyPS5 - Progress Report",
+        "description": description,
+        "color": 5793266,
+        "fields": fields,
+        "footer": {
+            "text": f"Automatic update • {now}"
+        }
+    }
 
 
 def send_discord(embed):
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+
+    if not webhook_url:
+        raise RuntimeError("DISCORD_WEBHOOK_URL is missing!")
+
     payload = {
-        "embeds": [embed],
-        "allowed_mentions": {"parse": []}
+        "embeds": [embed]
     }
 
     request = urllib.request.Request(
-        WEBHOOK,
-        data=json.dumps(
-            payload, ensure_ascii=False
-        ).encode("utf-8"),
+        webhook_url,
+        data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST"
     )
 
-    with urllib.request.urlopen(request, timeout=45) as response:
-        if response.status not in (200, 204):
-            raise RuntimeError("Discord sending failed")
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            print("Discord response:", response.status)
+            print("Message sent successfully!")
+
+    except urllib.error.HTTPError as error:
+        details = error.read().decode("utf-8", errors="replace")
+        print("Discord HTTP status:", error.code)
+        print("Discord error details:", details)
+        raise
+
+    except urllib.error.URLError as error:
+        print("Discord connection error:", error)
+        raise
 
 
 def main():
-    data = fetch_json(PROGRESS_URL)
+    print("Fetching AnyPS5 progress...")
 
-    libs = data["libraries"]
-    shader = data["shader_source"]
-    rdna = shader["instructions"]
-    gfx = shader["profiles"]["gfx1013"]["instructions"]
-    dpp = shader.get("dpp", {})
+    data = fetch_progress()
+    current = get_metrics(data)
+    previous = load_previous()
 
-    current = {
-        "libraries": {
-            "done": libs["done"],
-            "total": libs["total"]
-        },
-        "rdna2": {
-            "decoded": rdna["decoded"],
-            "total": rdna["total"],
-            "translated": rdna.get("translated", rdna["decoded"])
-        },
-        "gfx1013": {
-            "decoded": gfx["decoded"],
-            "total": gfx["total"],
-            "translated": gfx.get("translated", gfx["decoded"])
-        },
-        "dpp": {
-            "decoded": dpp.get("decoded", 0),
-            "total": dpp.get("total", 0)
-        }
-    }
+    print("Current metrics:", current)
 
-    previous = None
+    embed = make_embed(current, previous)
 
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, encoding="utf-8") as file:
-                previous = json.load(file)
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    old_libs = previous.get("libraries", {}) if previous else {}
-    old_rdna = previous.get("rdna2", {}) if previous else {}
-    old_gfx = previous.get("gfx1013", {}) if previous else {}
-    old_dpp = previous.get("dpp", {}) if previous else {}
-
-    lib_delta = (
-        libs["done"] - old_libs["done"]
-        if "done" in old_libs else None
-    )
-
-    rdna_delta = (
-        rdna["decoded"] - old_rdna["decoded"]
-        if "decoded" in old_rdna else None
-    )
-
-    gfx_delta = (
-        gfx["decoded"] - old_gfx["decoded"]
-        if "decoded" in old_gfx else None
-    )
-
-    if previous is None:
-        status = "🆕 أول تقرير - تم حفظ خط الأساس"
-        color = 3447003
-        summary = "ستبدأ مقارنة التقدم من التقرير القادم."
-
-    else:
-        total_delta = sum(
-            x for x in [lib_delta, rdna_delta, gfx_delta]
-            if x is not None
-        )
-
-        if total_delta > 0:
-            status = "📈 تقدم جديد منذ آخر تقرير"
-            color = 3066993
-        elif total_delta < 0:
-            status = "🔄 تغير في بيانات المشروع"
-            color = 15105570
-        else:
-            status = "⏸️ لا يوجد تغير منذ آخر تقرير"
-            color = 9807270
-
-        summary = (
-            f"System Libraries: **{signed(lib_delta or 0)}** دالة\n"
-            f"RDNA 2: **{signed(rdna_delta or 0)}** تعليمة\n"
-            f"gfx1013: **{signed(gfx_delta or 0)}** تعليمة"
-        )
-
-    fields = [
-        {
-            "name": "📚 System Libraries",
-            "value": metric(
-                "Implemented Functions",
-                libs["done"],
-                libs["total"],
-                old_libs.get("done")
-            ),
-            "inline": False
-        },
-        {
-            "name": "🧩 RDNA 2 Shader Instructions",
-            "value": (
-                metric(
-                    "Decoded",
-                    rdna["decoded"],
-                    rdna["total"],
-                    old_rdna.get("decoded")
-                )
-                + f"\nTranslated: **{current['rdna2']['translated']:,}**"
-            ),
-            "inline": True
-        },
-        {
-            "name": "🎮 gfx1013 Reference",
-            "value": (
-                metric(
-                    "Decoded",
-                    gfx["decoded"],
-                    gfx["total"],
-                    old_gfx.get("decoded")
-                )
-                + f"\nTranslated: **{current['gfx1013']['translated']:,}**"
-            ),
-            "inline": True
-        }
-    ]
-
-    if dpp.get("total"):
-        fields.append({
-            "name": "🔀 DPP Instructions",
-            "value": metric(
-                "Decoded",
-                dpp["decoded"],
-                dpp["total"],
-                old_dpp.get("decoded")
-            ),
-            "inline": True
-        })
-
-    now = datetime.now(timezone.utc).strftime(
-        "%Y-%m-%d %H:%M UTC"
-    )
-
-    generated = data.get(
-        "open_pr_progress", {}
-    ).get("generated_at", "غير متاح")
-
-    embed = {
-        "title": "🚀 AnyPS5 - Project Progress",
-        "url": "https://boykopovar.github.io/AnyPS5/",
-        "description": f"**{status}**\n\n{summary}",
-        "color": color,
-        "fields": fields,
-        "footer": {
-            "text": f"Report: {now} | Source: {generated}"
-        }
-    }
-
+    print("Sending Discord report...")
     send_discord(embed)
 
-    with open(STATE_FILE, "w", encoding="utf-8") as file:
-        json.dump(current, file, ensure_ascii=False, indent=2)
+    save_current(current)
+    print("Progress state saved.")
+    print("Done!")
 
 
 if __name__ == "__main__":
