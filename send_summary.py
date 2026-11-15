@@ -13,7 +13,7 @@ STATE_FILE = Path("last_progress.json")
 def fetch_progress():
     request = urllib.request.Request(
         DATA_URL,
-        headers={"User-Agent": "AnyPS5-Discord-Bot"}
+        headers={"User-Agent": "AnyPS5ProgressBot/1.0"}
     )
 
     with urllib.request.urlopen(request, timeout=45) as response:
@@ -31,18 +31,15 @@ def get_metrics(data):
     return {
         "libraries": (
             libraries.get("completed", 0)
-            if isinstance(libraries, dict)
-            else 0
+            if isinstance(libraries, dict) else 0
         ),
         "rdna2": (
             instructions.get("decoded", 0)
-            if isinstance(instructions, dict)
-            else 0
+            if isinstance(instructions, dict) else 0
         ),
         "gfx1013": (
             gfx_instructions.get("decoded", 0)
-            if isinstance(gfx_instructions, dict)
-            else 0
+            if isinstance(gfx_instructions, dict) else 0
         ),
     }
 
@@ -77,13 +74,13 @@ def format_delta(current, previous):
 def make_embed(current, previous):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    fields = []
-
     names = {
         "libraries": "Libraries completed",
         "rdna2": "RDNA2 instructions decoded",
         "gfx1013": "GFX1013 instructions decoded",
     }
+
+    fields = []
 
     for key, name in names.items():
         value = current.get(key, 0)
@@ -101,7 +98,10 @@ def make_embed(current, previous):
         })
 
     if previous is None:
-        description = "Initial progress report. The next update will show changes."
+        description = (
+            "Initial progress report. "
+            "The next update will show changes."
+        )
     else:
         changes = [
             current.get(key, 0) - previous.get(key, 0)
@@ -111,9 +111,9 @@ def make_embed(current, previous):
         if any(value > 0 for value in changes):
             description = "Progress has increased since the previous report."
         elif any(value < 0 for value in changes):
-            description = "Some reported values have changed since the previous report."
+            description = "Some reported values have changed."
         else:
-            description = "No progress changes detected since the previous report."
+            description = "No progress changes since the previous report."
 
     return {
         "title": "AnyPS5 - Progress Report",
@@ -139,7 +139,10 @@ def send_discord(embed):
     request = urllib.request.Request(
         webhook_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "AnyPS5ProgressBot/1.0"
+        },
         method="POST"
     )
 
