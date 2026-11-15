@@ -1,1 +1,47 @@
+name: AnyPS5 progress image to Discord
 
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-progress-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SVG converter
+        run: python -m pip install --disable-pip-version-check cairosvg
+
+      - name: Download the original AnyPS5 progress image
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            "https://boykopovar.github.io/AnyPS5/progress.svg" \
+            --output progress.svg
+          test -s progress.svg
+          head -c 500 progress.svg | grep -qi '<svg'
+
+      - name: Convert SVG to PNG for Discord
+        run: |
+          python - <<'PY'
+          import cairosvg
+          cairosvg.svg2png(
+              url="progress.svg",
+              write_to="progress.png",
+              output_width=1600
+          )
+          PY
+          test -s progress.png
+
+      - name: Send image to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent \
+            --request POST "$DISCORD_WEBHOOK_URL" \
+            --form 'payload_json={"content":"📊 **AnyPS5 – Progress update**"}' \
+            --form 'files[0]=@progress.png;type=image/png'
