@@ -4,7 +4,8 @@ import os
 import urllib.request
 import urllib.error
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 DATA_URL = "https://boykopovar.github.io/AnyPS5/progress.json"
 STATE_FILE = Path("last_progress.json")
@@ -98,9 +99,9 @@ def delta(current, previous):
 
 
 def make_embed(current, previous):
-    now = datetime.now(timezone.utc).strftime(
-        "%d %b %Y • %H:%M UTC"
-    )
+    now = datetime.now(
+        ZoneInfo("Asia/Kuwait")
+    ).strftime("%d %b %Y • %H:%M")
 
     def change(key):
         if previous is None:
@@ -154,7 +155,7 @@ def make_embed(current, previous):
         "description": description + "\n\n" + "\n".join(lines),
         "color": 5793266,
         "footer": {
-            "text": f"Updated • {now}"
+            "text": f"Updated • {now} Kuwait Time (UTC+3)"
         }
     }
 
