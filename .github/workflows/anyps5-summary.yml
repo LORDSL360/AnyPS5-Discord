@@ -3,7 +3,7 @@ name: AnyPS5 Progress Summary
 
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "17 */2 * * *"
 
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Send Progress
+      - name: Send Progress to Discord
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python send_summary.py
